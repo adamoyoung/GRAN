@@ -420,6 +420,9 @@ class GRANMixtureBernoulli(nn.Module):
     label = input_dict['label'] if 'label' in input_dict else None
     num_nodes_pmf = input_dict[
         'num_nodes_pmf'] if 'num_nodes_pmf' in input_dict else None
+    subgraph_idx_base = input_dict[
+        "subgraph_idx_base"] if "subgraph_idx_base" in input_dict else None
+
 
     N_max = self.max_num_nodes
 
@@ -436,9 +439,9 @@ class GRANMixtureBernoulli(nn.Module):
 
       num_edges = log_theta.shape[0]
 
-      adj_loss = mixture_bernoulli_loss(label, log_theta, log_alpha,
-                                        self.adj_loss_func, subgraph_idx)
-      adj_loss = adj_loss * float(self.num_canonical_order)
+      adj_loss = mixture_bernoulli_loss_corrected(label, log_theta, log_alpha,
+                                        self.adj_loss_func, subgraph_idx, subgraph_idx_base,
+                                        self.num_canonical_order, reduction="mean")
 
       return adj_loss
     else:
@@ -455,8 +458,8 @@ class GRANMixtureBernoulli(nn.Module):
       return A_list
 
 
-def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
-                           subgraph_idx):
+def mixture_bernoulli_loss_corrected(label, log_theta, log_alpha, adj_loss_func,
+                           subgraph_idx, subgraph_idx_base, num_canonical_order, reduction="mean"):
   """
     Compute likelihood for mixture of Bernoulli model
 
@@ -466,13 +469,21 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
       log_alpha: E X D, see comments above
       adj_loss_func: BCE loss
       subgraph_idx: E X 1, see comments above
+      subgraph_idx_base: B+1
+      batch_size: int
+      num_canonical_order: int
 
     Returns:
       loss: negative log likelihood
   """
 
   num_subgraph = subgraph_idx.max() + 1
+  assert num_subgraph == subgraph_idx_base[-1]
+  B = subgraph_idx_base.size - 1
+  C = num_canonical_order
+  E = log_theta.shape[0]
   K = log_theta.shape[1]
+  assert E % C == 0
   adj_loss = torch.stack(
       [adj_loss_func(log_theta[:, kk], label) for kk in range(K)], dim=1)
 
@@ -492,6 +503,59 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
 
   log_prob = -reduce_adj_loss + reduce_log_alpha
   log_prob = torch.logsumexp(log_prob, dim=1)
-  loss = -log_prob.sum() / float(log_theta.shape[0])
-
+  order_log_prob = torch.zeros([B,C]).to(label.device)
+  for i in range(B):
+    start_idx = subgraph_idx_base[i]
+    end_idx = subgraph_idx_base[i+1]
+    b_log_prob = log_prob[start_idx:end_idx].reshape(C,-1).sum(1)
+    b_const = const[start_idx:end_idx].sum() / float(C)
+    order_log_prob[i] = b_log_prob / b_const
+  log_prob = torch.logsumexp(order_log_prob, dim=1) 
+  loss = -log_prob
+  if reduction == "mean":
+    loss = loss.mean()
+  elif reduction == "sum":
+    loss = loss.sum()
+  else:
+    assert reduction == "none"
   return loss
+
+  # # num_subgraph = subgraph_idx.max() + 1
+  # B = batch_size # includes multiple forward passes
+  # C = num_canonical_order
+  # E = log_theta.shape[0]
+  # K = log_theta.shape[1]
+  # assert E % (B*C) == 0
+  # E_c = E // (B*C)
+  # adj_loss = torch.stack(
+  #     [adj_loss_func(log_theta[:, kk], label) for kk in range(K)], dim=1)
+  # # reshape all input vectors to separate based on orderings
+  # label = label.reshape(B, C, E_c).transpose(0,1).reshape(C, B*E_c)
+  # log_theta = log_theta.reshape(B, C, E_c, K).transpose(0,1).reshape(C, B*E_c, K)
+  # log_alpha = log_alpha.reshape(B, C, E_c, K).transpose(0,1).reshape(C, B*E_c, K)
+  # adj_loss = adj_loss.reshape(B, C, E_c, K).transpose(0,1).reshape(C, B*E_c, K)
+  # subgraph_idx = subgraph_idx.reshape(B, C, E_c).transpose(0,1).reshape(C, B*E_c)
+  # un_idx, un_count = torch.unique(subgraph_idx[0], sorted=False, return_counts=True)
+  # num_subgraph = un_idx.shape[0]
+
+  # const = un_count.reshape(1,-1,1).expand(C,-1,K)
+  # subgraph_idx = torch.repeat_interleave(torch.arange(num_subgraph).to(label.device), un_count)
+  # subgraph_idx = subgraph_idx.reshape(1,-1,1).expand(C,-1,K)
+
+  # reduce_adj_loss = torch.zeros(C, num_subgraph, K).to(label.device)
+  # reduce_adj_loss = reduce_adj_loss.scatter_add_(
+  #     1, subgraph_idx, adj_loss)
+
+  # reduce_log_alpha = torch.zeros(C, num_subgraph, K).to(label.device)
+  # reduce_log_alpha = reduce_log_alpha.scatter_add(
+  #     1, subgraph_idx, log_alpha)
+  # reduce_log_alpha = reduce_log_alpha / const
+  # reduce_log_alpha = F.log_softmax(reduce_log_alpha, -1)
+
+  # order_log_prob = -reduce_adj_loss + reduce_log_alpha
+  # order_log_prob = torch.logsumexp(order_log_prob, dim=-1)
+  # order_log_prob = order_log_prob.sum(1) / float(B*E_c)
+  # log_prob = torch.logsumexp(order_log_prob, dim=0)
+  # loss = -log_prob
+
+  # return loss
