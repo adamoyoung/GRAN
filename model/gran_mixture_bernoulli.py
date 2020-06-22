@@ -479,7 +479,7 @@ def mixture_bernoulli_loss_corrected(label, log_theta, log_alpha, adj_loss_func,
 
   num_subgraph = subgraph_idx.max() + 1
   assert num_subgraph == subgraph_idx_base[-1]
-  B = subgraph_idx_base.size - 1
+  B = subgraph_idx_base.shape[0] - 1
   C = num_canonical_order
   E = log_theta.shape[0]
   K = log_theta.shape[1]
