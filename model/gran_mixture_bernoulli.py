@@ -439,7 +439,7 @@ class GRANMixtureBernoulli(nn.Module):
 
       num_edges = log_theta.shape[0]
 
-      adj_loss = mixture_bernoulli_loss_corrected(label, log_theta, log_alpha,
+      adj_loss = mixture_bernoulli_loss(label, log_theta, log_alpha,
                                         self.adj_loss_func, subgraph_idx, subgraph_idx_base,
                                         self.num_canonical_order, reduction="mean")
 
@@ -458,7 +458,7 @@ class GRANMixtureBernoulli(nn.Module):
       return A_list
 
 
-def mixture_bernoulli_loss_corrected(label, log_theta, log_alpha, adj_loss_func,
+def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
                            subgraph_idx, subgraph_idx_base, num_canonical_order, reduction="mean"):
   """
     Compute likelihood for mixture of Bernoulli model
@@ -470,8 +470,8 @@ def mixture_bernoulli_loss_corrected(label, log_theta, log_alpha, adj_loss_func,
       adj_loss_func: BCE loss
       subgraph_idx: E X 1, see comments above
       subgraph_idx_base: B+1
-      batch_size: int
       num_canonical_order: int
+      reduction: string, "none" or "mean" or "sum"
 
     Returns:
       loss: negative log likelihood
