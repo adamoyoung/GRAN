@@ -441,7 +441,8 @@ class GRANMixtureBernoulli(nn.Module):
 
       adj_loss = mixture_bernoulli_loss(label, log_theta, log_alpha,
                                         self.adj_loss_func, subgraph_idx, subgraph_idx_base,
-                                        self.num_canonical_order, reduction="mean")
+                                        self.num_canonical_order, 
+                                        return_logp=False, reduction="mean")
 
       return adj_loss
     else:
@@ -459,7 +460,8 @@ class GRANMixtureBernoulli(nn.Module):
 
 
 def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
-                           subgraph_idx, subgraph_idx_base, num_canonical_order, reduction="mean"):
+                           subgraph_idx, subgraph_idx_base, num_canonical_order, 
+                           return_logp=False, reduction="mean"):
   """
     Compute likelihood for mixture of Bernoulli model
 
@@ -469,16 +471,16 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
       log_alpha: E X D, see comments above
       adj_loss_func: BCE loss
       subgraph_idx: E X 1, see comments above
-      subgraph_idx_base: B+1
-      num_canonical_order: int
-      reduction: string, "none" or "mean" or "sum"
+      subgraph_idx_base: B+1, # of edges in the subgraphs (for all orderings) associated with each batch
+      num_canonical_order: int, number of node orderings considered
+      return_logp: boolean, if True return log p instead of loss (-log p / E)
+      reduction: string, type of reduction on batch dimension ("mean", "sum", "none")
 
     Returns:
-      loss: negative log likelihood
+      loss or log p
   """
 
-  num_subgraph = subgraph_idx.max() + 1
-  assert num_subgraph == subgraph_idx_base[-1]
+  num_subgraph = subgraph_idx_base[-1] # == subgraph_idx.max() + 1
   B = subgraph_idx_base.shape[0] - 1
   C = num_canonical_order
   E = log_theta.shape[0]
@@ -487,7 +489,7 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
   adj_loss = torch.stack(
       [adj_loss_func(log_theta[:, kk], label) for kk in range(K)], dim=1)
 
-  const = torch.zeros(num_subgraph).to(label.device)
+  const = torch.zeros(num_subgraph).to(label.device) # S
   const = const.scatter_add(0, subgraph_idx,
                             torch.ones_like(subgraph_idx).float())
 
@@ -502,20 +504,29 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
   reduce_log_alpha = F.log_softmax(reduce_log_alpha, -1)
 
   log_prob = -reduce_adj_loss + reduce_log_alpha
-  log_prob = torch.logsumexp(log_prob, dim=1)
-  order_log_prob = torch.zeros([B,C]).to(label.device)
-  for i in range(B):
-    start_idx = subgraph_idx_base[i]
-    end_idx = subgraph_idx_base[i+1]
-    b_log_prob = log_prob[start_idx:end_idx].reshape(C,-1).sum(1)
-    b_const = const[start_idx:end_idx].sum() / float(C)
-    order_log_prob[i] = b_log_prob / b_const
-  log_prob = torch.logsumexp(order_log_prob, dim=1) 
-  loss = -log_prob
+  log_prob = torch.logsumexp(log_prob, dim=1) # S, K
+
+  bc_log_prob = torch.zeros([B*C]).to(label.device) # B*C
+  bc_idx = torch.arange(B*C).to(label.device) # B*C
+  bc_const = torch.zeros(B*C).to(label.device)
+  bc_size = (subgraph_idx_base[1:] - subgraph_idx_base[:-1]) // C # B
+  bc_size = torch.repeat_interleave(bc_size, C) # B*C
+  bc_idx = torch.repeat_interleave(bc_idx, bc_size) # S
+  bc_log_prob = bc_log_prob.scatter_add(0, bc_idx, log_prob)
+  if not return_logp:
+    # normalize for numerical stability
+    bc_const = bc_const.scatter_add(0, bc_idx, const)
+    bc_log_prob = (bc_log_prob / bc_const)
+  bc_log_prob = bc_log_prob.reshape(B,C)
+  b_log_prob = torch.logsumexp(bc_log_prob, dim=1)
+  
+  b_loss = b_log_prob if return_logp else -b_log_prob
   if reduction == "mean":
-    loss = loss.mean()
+    loss = b_loss.mean()
   elif reduction == "sum":
-    loss = loss.sum()
+    loss = b_loss.sum()
   else:
     assert reduction == "none"
+    loss = b_loss
+  
   return loss
