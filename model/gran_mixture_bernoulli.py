@@ -520,7 +520,9 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
   bc_log_prob = bc_log_prob.reshape(B,C)
   b_log_prob = torch.logsumexp(bc_log_prob, dim=1)
   
-  b_loss = b_log_prob if return_logp else -b_log_prob
+  # probability calculation was for lower-triangular edges
+  # must be squared to get probability for entire graph
+  b_loss = 2*b_log_prob if return_logp else -b_log_prob
   if reduction == "mean":
     loss = b_loss.mean()
   elif reduction == "sum":
