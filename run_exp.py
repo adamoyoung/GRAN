@@ -1,5 +1,6 @@
-import os
 import sys
+sys.path.extend(["runner","utils"])
+import os
 import torch
 import logging
 import traceback

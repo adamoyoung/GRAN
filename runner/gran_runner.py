@@ -234,19 +234,20 @@ class GranRunner(object):
           if self.use_gpu:
             for dd, gpu_id in enumerate(self.gpus):
               data = {}
-              data['adj'] = batch_data[dd][ff]['adj'].pin_memory().to(gpu_id, non_blocking=True)          
-              data['edges'] = batch_data[dd][ff]['edges'].pin_memory().to(gpu_id, non_blocking=True)
-              data['node_idx_gnn'] = batch_data[dd][ff]['node_idx_gnn'].pin_memory().to(gpu_id, non_blocking=True)
-              data['node_idx_feat'] = batch_data[dd][ff]['node_idx_feat'].pin_memory().to(gpu_id, non_blocking=True)
-              data['label'] = batch_data[dd][ff]['label'].pin_memory().to(gpu_id, non_blocking=True)
-              data['att_idx'] = batch_data[dd][ff]['att_idx'].pin_memory().to(gpu_id, non_blocking=True)
-              data['subgraph_idx'] = batch_data[dd][ff]['subgraph_idx'].pin_memory().to(gpu_id, non_blocking=True)
-              data['subgraph_idx_base'] = batch_data[dd][ff]['subgraph_idx_base'].pin_memory().to(gpu_id, non_blocking=True)
+              non_blocking = False
+              data['adj'] = batch_data[dd][ff]['adj'].pin_memory().to(gpu_id, non_blocking=non_blocking)          
+              data['edges'] = batch_data[dd][ff]['edges'].pin_memory().to(gpu_id, non_blocking=non_blocking)
+              data['node_idx_gnn'] = batch_data[dd][ff]['node_idx_gnn'].pin_memory().to(gpu_id, non_blocking=non_blocking)
+              data['node_idx_feat'] = batch_data[dd][ff]['node_idx_feat'].pin_memory().to(gpu_id, non_blocking=non_blocking)
+              data['label'] = batch_data[dd][ff]['label'].pin_memory().to(gpu_id, non_blocking=non_blocking)
+              data['att_idx'] = batch_data[dd][ff]['att_idx'].pin_memory().to(gpu_id, non_blocking=non_blocking)
+              data['subgraph_idx'] = batch_data[dd][ff]['subgraph_idx'].pin_memory().to(gpu_id, non_blocking=non_blocking)
+              data["subgraph_idx_base"] = batch_data[dd][ff]['subgraph_idx_base'].pin_memory().to(gpu_id, non_blocking=non_blocking)
               batch_fwd.append((data,))
 
-          if batch_fwd:
-            train_loss = model(*batch_fwd).mean()              
-            avg_train_loss += train_loss              
+          if batch_fwd:              
+            train_loss = model(*batch_fwd).data.cpu().numpy().mean()
+            avg_train_loss += train_loss
 
             # assign gradient
             train_loss.backward()
