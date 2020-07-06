@@ -234,7 +234,7 @@ class GranRunner(object):
           if self.use_gpu:
             for dd, gpu_id in enumerate(self.gpus):
               data = {}
-              non_blocking = False
+              non_blocking = True
               data['adj'] = batch_data[dd][ff]['adj'].pin_memory().to(gpu_id, non_blocking=non_blocking)          
               data['edges'] = batch_data[dd][ff]['edges'].pin_memory().to(gpu_id, non_blocking=non_blocking)
               data['node_idx_gnn'] = batch_data[dd][ff]['node_idx_gnn'].pin_memory().to(gpu_id, non_blocking=non_blocking)
@@ -246,7 +246,7 @@ class GranRunner(object):
               batch_fwd.append((data,))
 
           if batch_fwd:              
-            train_loss = model(*batch_fwd).data.cpu().numpy().mean()
+            train_loss = model(*batch_fwd).mean()
             avg_train_loss += train_loss
 
             # assign gradient
@@ -258,7 +258,7 @@ class GranRunner(object):
         
         # reduce
         train_loss = float(avg_train_loss.data.cpu().numpy())
-        
+
         self.writer.add_scalar('train_loss', train_loss, iter_count)
         results['train_loss'] += [train_loss]
         results['train_step'] += [iter_count]

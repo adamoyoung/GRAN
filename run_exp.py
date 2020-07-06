@@ -20,6 +20,8 @@ def main():
   torch.manual_seed(config.seed)
   torch.cuda.manual_seed_all(config.seed)
   config.use_gpu = config.use_gpu and torch.cuda.is_available()
+  if config.use_gpu:
+    torch.cuda.set_device(config.device)
 
   # log info
   log_file = os.path.join(config.save_dir, "log_exp_{}.txt".format(config.run_id))
