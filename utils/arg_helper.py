@@ -38,6 +38,12 @@ def get_config(config_file, exp_dir=None, is_test=False):
   # config = edict(yaml.load(open(config_file, 'r'), Loader=yaml.FullLoader))
   config = edict(yaml.load(open(config_file, 'r')))
 
+  # manage cuda devices
+  device_id = int(config.device.strip("cuda:"))
+  assert device_id in config.gpus, (device_id, config.gpus)
+  config.gpus.remove(device_id)
+  config.gpus = [device_id] + config.gpus
+
   # create hyper parameters
   config.run_id = str(os.getpid())
   config.exp_name = '_'.join([

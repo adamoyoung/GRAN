@@ -227,7 +227,8 @@ class GranRunner(object):
             iter_count += 1
         
         
-        avg_train_loss = .0        
+        avg_train_loss = 0.
+        avg_train_nll = 0.       
         for ff in range(self.dataset_conf.num_fwd_pass):
           batch_fwd = []
           
@@ -246,8 +247,11 @@ class GranRunner(object):
               batch_fwd.append((data,))
 
           if batch_fwd:              
-            train_loss = model(*batch_fwd).mean()
+            train_loss, train_nll = model(*batch_fwd)
+            train_loss = train_loss.mean()
+            train_nll = train_nll.mean()
             avg_train_loss += train_loss
+            avg_train_nll += train_nll
 
             # assign gradient
             train_loss.backward()
@@ -255,16 +259,21 @@ class GranRunner(object):
         # clip_grad_norm_(model.parameters(), 5.0e-0)
         optimizer.step()
         avg_train_loss /= float(self.dataset_conf.num_fwd_pass)
-        
+        avg_train_nll /= float(self.dataset_conf.num_fwd_pass)
+
         # reduce
         train_loss = float(avg_train_loss.data.cpu().numpy())
+        train_nll = float(avg_train_nll.data.cpu().numpy())
 
         self.writer.add_scalar('train_loss', train_loss, iter_count)
+        self.writer.add_scalar('train_nll', train_nll, iter_count)
         results['train_loss'] += [train_loss]
+        results['train_nll'] += [train_nll]
         results['train_step'] += [iter_count]
 
         if iter_count % self.train_conf.display_iter == 0 or iter_count == 1:
-          logger.info("NLL Loss @ epoch {:04d} iteration {:08d} = {}".format(epoch + 1, iter_count, train_loss))
+          logger.info("Loss @ epoch {:04d} iteration {:08d} = {}".format(epoch + 1, iter_count, train_loss))
+          logger.info("NLL @ epoch {:04d} iteration {:08d} = {}".format(epoch + 1, iter_count, train_nll))
 
       # snapshot model
       if (epoch + 1) % self.train_conf.snapshot_epoch == 0:

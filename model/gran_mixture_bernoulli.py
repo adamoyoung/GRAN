@@ -166,6 +166,7 @@ class GRANMixtureBernoulli(nn.Module):
     self.num_mix_component = config.model.num_mix_component
     self.has_rand_feat = False # use random feature instead of 1-of-K encoding
     self.att_edge_dim = 64
+    self.sum_order_log_prob = config.train.sum_order_log_prob
 
     self.output_theta = nn.Sequential(
         nn.Linear(self.hidden_dim, self.hidden_dim),
@@ -439,12 +440,12 @@ class GRANMixtureBernoulli(nn.Module):
 
       num_edges = log_theta.shape[0]
 
-      adj_loss = mixture_bernoulli_loss(label, log_theta, log_alpha,
+      adj_loss, adj_nll = mixture_bernoulli_loss(label, log_theta, log_alpha,
                                         self.adj_loss_func, subgraph_idx, subgraph_idx_base,
                                         self.num_canonical_order, 
-                                        return_logp=False, reduction="mean")
+                                        sum_order_log_prob=self.sum_order_log_prob)
 
-      return adj_loss
+      return adj_loss, adj_nll
     else:
       A = self._sampling(batch_size)
 
@@ -461,7 +462,7 @@ class GRANMixtureBernoulli(nn.Module):
 
 def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
                            subgraph_idx, subgraph_idx_base, num_canonical_order, 
-                           return_logp=False, reduction="mean"):
+                           sum_order_log_prob=False, return_neg_log_prob=True, reduction="mean"):
   """
     Compute likelihood for mixture of Bernoulli model
 
@@ -473,11 +474,14 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
       subgraph_idx: E X 1, see comments above
       subgraph_idx_base: B+1, # of edges in the subgraphs (for all orderings) associated with each batch
       num_canonical_order: int, number of node orderings considered
-      return_logp: boolean, if True return log p instead of loss (-log p / E)
+      sum_order_log_prob: boolean, if True sum the log prob of orderings instead of taking logsumexp 
+        i.e. log p(G, pi_1) + log p(G, pi_2) instead of log [p(G, pi_1) + p(G, pi_2)]
+        This is equivalent to the original GRAN loss.
+      return_neg_log_prob: boolean, if True also return neg log prob
       reduction: string, type of reduction on batch dimension ("mean", "sum", "none")
 
     Returns:
-      loss or log p
+      loss or log prob
   """
 
   num_subgraph = subgraph_idx_base[-1] # == subgraph_idx.max() + 1
@@ -513,22 +517,36 @@ def mixture_bernoulli_loss(label, log_theta, log_alpha, adj_loss_func,
   bc_size = torch.repeat_interleave(bc_size, C) # B*C
   bc_idx = torch.repeat_interleave(bc_idx, bc_size) # S
   bc_log_prob = bc_log_prob.scatter_add(0, bc_idx, log_prob)
-  if not return_logp:
-    # normalize for numerical stability
-    bc_const = bc_const.scatter_add(0, bc_idx, const)
-    bc_log_prob = (bc_log_prob / bc_const)
+  # loss must be normalized for numerical stability
+  bc_const = bc_const.scatter_add(0, bc_idx, const)
+  bc_loss = (bc_log_prob / bc_const)
+
   bc_log_prob = bc_log_prob.reshape(B,C)
-  b_log_prob = torch.logsumexp(bc_log_prob, dim=1)
-  
+  bc_loss = bc_loss.reshape(B,C)
+  if sum_order_log_prob:
+    b_log_prob = torch.sum(bc_log_prob, dim=1)
+    b_loss = torch.sum(bc_loss, dim=1)
+  else:
+    b_log_prob = torch.logsumexp(bc_log_prob, dim=1)
+    b_loss = torch.logsumexp(bc_loss, dim=1)
+
   # probability calculation was for lower-triangular edges
   # must be squared to get probability for entire graph
-  b_loss = 2*b_log_prob if return_logp else -b_log_prob
+  b_neg_log_prob = -2*b_log_prob
+  b_loss = -b_loss
+  
   if reduction == "mean":
+    neg_log_prob = b_neg_log_prob.mean()
     loss = b_loss.mean()
   elif reduction == "sum":
+    neg_log_prob = b_neg_log_prob.sum()
     loss = b_loss.sum()
   else:
     assert reduction == "none"
+    neg_log_prob = b_neg_log_prob
     loss = b_loss
   
-  return loss
+  if return_neg_log_prob:
+    return loss, neg_log_prob
+  else:
+    return loss

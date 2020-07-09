@@ -39,8 +39,8 @@ train:
   optimizer: Adam  
   lr_decay: 0.3
   lr_decay_epoch: [100000000] # no decay
-  num_workers: 4 # 8
-  max_epoch: 50000 # 100000
+  num_workers: 8
+  max_epoch: 20000 # 100000
   batch_size: 6
   display_iter: 10
   snapshot_epoch: 1000
@@ -53,6 +53,7 @@ train:
   resume_epoch: 5000
   resume_dir: # exp/GRAN/your_exp_folder
   resume_model: model_snapshot_0005000.pth
+  sum_order_log_prob: false
 test:
   batch_size: 20
   num_workers: 0
